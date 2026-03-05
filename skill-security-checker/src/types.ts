@@ -19,6 +19,7 @@ export interface PatternMatch {
   code: string;
   description: string;
   severity: 'high' | 'medium' | 'low';
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface RepoReputationResult {

@@ -36,7 +36,7 @@ if (args.includes('-h') || args.includes('--help')) {
 }
 
 const command = args[0];
-const target = args[1];
+let target = args[1];
 const format = args[2] || 'concise';
 const enableRuntime = args.includes('--runtime');
 
@@ -53,6 +53,8 @@ function normalizeGithubInput(input) {
     if (repoUrl.endsWith('.git')) {
       repoUrl = repoUrl.replace(/\.git$/, '');
     }
+  } else if (input.includes('/') && !input.includes('://')) {
+    repoUrl = `https://github.com/${input.replace(/^\/+/, '')}`;
   }
   return repoUrl;
 }
