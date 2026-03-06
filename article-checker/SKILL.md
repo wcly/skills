@@ -1,3 +1,8 @@
+---
+name: article-checker
+description: 基于 LLM 的文章校对助手，检测错别字、病句、拼写错误、逻辑错误等问题
+---
+
 # article-checker
 
 文章智能校验工具 - 基于 LLM 的文章校对助手
