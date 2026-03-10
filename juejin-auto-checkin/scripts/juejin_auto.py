@@ -481,5 +481,23 @@ async def run_task():
     except Exception as e:
         log(f"❌ 执行出错: {e}", True)
 
+def cleanup_screenshots():
+    """清理生成的截图文件"""
+    files_to_delete = [
+        "lottery_page.png",
+        "lottery_result.png",
+        "lottery_result2.png",
+        "lottery_page.html"
+    ]
+    
+    for file_path in files_to_delete:
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                log(f"🗑️ 已删除截图文件: {file_path}")
+        except Exception as e:
+            log(f"删除文件时出错: {e}", True)
+
 if __name__ == "__main__":
     asyncio.run(run_task())
+    cleanup_screenshots()
