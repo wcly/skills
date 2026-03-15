@@ -60,6 +60,59 @@ async def check_login_status(page, context):
         log(f"检查登录状态出错: {e}", True)
         return True  # 假设已登录，继续尝试
 
+async def wait_for_login(page, context, timeout_seconds=300):
+    """
+    等待用户登录
+    timeout_seconds: 最大等待时间，默认300秒（5分钟）
+    """
+    log("\n" + "=" * 50)
+    log("🔐 检测到未登录，开始等待用户登录...")
+    log("=" * 50)
+    log("📋 请在浏览器中扫码登录稀土掘金")
+    log(f"⏱️ 最多等待 {timeout_seconds} 秒，请尽快完成登录")
+    log("=" * 50)
+    
+    await page.goto("https://juejin.cn", timeout=20000)
+    await page.wait_for_load_state("domcontentloaded")
+    
+    check_interval = 5  # 每5秒检查一次
+    elapsed = 0
+    
+    while elapsed < timeout_seconds:
+        await asyncio.sleep(check_interval)
+        elapsed += check_interval
+        
+        try:
+            login_text = page.locator('text="登录"')
+            if await login_text.count() > 0:
+                remaining = timeout_seconds - elapsed
+                log(f"⏳ 等待登录中... 剩余 {remaining} 秒")
+                continue
+        except Exception as e:
+            pass
+        
+        try:
+            user_avatar = page.locator('.avatar, [class*="avatar"], .user-avatar')
+            if await user_avatar.count() > 0:
+                log("✅ 检测到用户头像，登录成功！")
+                await asyncio.sleep(2)
+                return True
+        except Exception as e:
+            pass
+        
+        cookies = await context.cookies()
+        for cookie in cookies:
+            if cookie['name'] in ['uid', 'token', 'sessionid', 'csrf_token']:
+                log("✅ 检测到认证 Cookie，登录成功！")
+                await asyncio.sleep(2)
+                return True
+        
+        remaining = timeout_seconds - elapsed
+        log(f"⏳ 等待登录中... 剩余 {remaining} 秒")
+    
+    log("❌ 等待登录超时")
+    return False
+
 async def do_signin(page):
     log("\n📝 访问签到页面...")
     await page.goto(SIGNIN_URL)
@@ -440,9 +493,12 @@ async def run_task():
             
             is_logged_in = await check_login_status(page, context)
             if not is_logged_in:
-                log("❌ 未登录，请先登录")
-                await context.close()
-                return
+                login_success = await wait_for_login(page, context)
+                if not login_success:
+                    log("❌ 登录超时，请稍后重试")
+                    await context.close()
+                    return
+                log("✅ 登录成功，继续执行签到任务...")
             
             signin_result = await do_signin(page)
             
