@@ -60,40 +60,215 @@ async def check_login_status(page, context):
         log(f"检查登录状态出错: {e}", True)
         return True  # 假设已登录，继续尝试
 
-async def do_signin(page):
-    log("\n📝 访问签到页面...")
-    await page.goto(SIGNIN_URL)
-    await page.wait_for_load_state("networkidle")
-    await asyncio.sleep(2)
+async def wait_for_login(page, context, timeout_seconds=300):
+    """
+    等待用户登录
+    timeout_seconds: 最大等待时间，默认300秒（5分钟）
+    """
+    log("\n" + "=" * 50)
+    log("🔐 检测到未登录，开始等待用户登录...")
+    log("=" * 50)
+    log("📋 请在浏览器中扫码登录稀土掘金")
+    log(f"⏱️ 最多等待 {timeout_seconds} 秒，请尽快完成登录")
+    log("=" * 50)
     
-    try:
-        already_signed = page.locator('text="已签到"')
-        if await already_signed.count() > 0:
-            log("ℹ️ 今日已签到")
-            return "already_signed"
-    except Exception as e:
-        log(f"检查已签到: {e}", True)
+    await page.goto("https://juejin.cn", timeout=20000)
+    await page.wait_for_load_state("domcontentloaded")
     
-    try:
-        signin_btn = page.locator('button:has-text("签到")')
-        if await signin_btn.count() > 0:
-            log("📝 正在签到...")
-            await signin_btn.first.click()
-            
-            await page.wait_for_load_state("networkidle", timeout=10000)
-            await asyncio.sleep(3)
-            
-            page_text = await page.evaluate("document.body.innerText")
-            if "已签到" in page_text or "签到成功" in page_text:
-                log("✅ 签到成功！")
+    check_interval = 5  # 每5秒检查一次
+    elapsed = 0
+    
+    while elapsed < timeout_seconds:
+        await asyncio.sleep(check_interval)
+        elapsed += check_interval
+        
+        try:
+            login_text = page.locator('text="登录"')
+            if await login_text.count() > 0:
+                remaining = timeout_seconds - elapsed
+                log(f"⏳ 等待登录中... 剩余 {remaining} 秒")
+                continue
+        except Exception as e:
+            pass
+        
+        try:
+            user_avatar = page.locator('.avatar, [class*="avatar"], .user-avatar')
+            if await user_avatar.count() > 0:
+                log("✅ 检测到用户头像，登录成功！")
+                await asyncio.sleep(2)
                 return True
-            else:
-                log("✅ 签到按钮已点击")
+        except Exception as e:
+            pass
+        
+        cookies = await context.cookies()
+        for cookie in cookies:
+            if cookie['name'] in ['uid', 'token', 'sessionid', 'csrf_token']:
+                log("✅ 检测到认证 Cookie，登录成功！")
+                await asyncio.sleep(2)
                 return True
-    except Exception as e:
-        log(f"签到错误: {e}", True)
+        
+        remaining = timeout_seconds - elapsed
+        log(f"⏳ 等待登录中... 剩余 {remaining} 秒")
     
+    log("❌ 等待登录超时")
     return False
+
+async def do_signin_api(context):
+    """通过 API 接口签到（更可靠，不依赖页面渲染）"""
+    log("\n📝 尝试 API 签到...")
+    try:
+        cookies = await context.cookies("https://juejin.cn")
+        cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+        
+        # 提取 csrf token
+        csrf_token = ""
+        for c in cookies:
+            if c['name'] == 'csrf_token':
+                csrf_token = c['value']
+                break
+        
+        if not cookie_str:
+            log("❌ API签到失败: 无 Cookie", True)
+            return None
+        
+        page = context.pages[0] if len(context.pages) > 0 else await context.new_page()
+        
+        # 确保在 juejin.cn 域名下，以便 fetch 能带上 cookies
+        current_url = page.url
+        if 'juejin.cn' not in current_url:
+            await page.goto("https://juejin.cn", timeout=15000)
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            await asyncio.sleep(1)
+        
+        # 先检查今日是否已签到
+        check_result = await page.evaluate('''
+            async () => {
+                try {
+                    const resp = await fetch("https://api.juejin.cn/growth_api/v1/get_today_status", {
+                        method: "GET",
+                        credentials: "include",
+                        headers: {
+                            "Content-Type": "application/json",
+                        }
+                    });
+                    return await resp.json();
+                } catch(e) {
+                    return {err_msg: e.message};
+                }
+            }
+        ''')
+        
+        log(f"   签到状态检查: {check_result}")
+        
+        if check_result and check_result.get('err_no') == 0:
+            if check_result.get('data'):
+                log("ℹ️ 今日已签到（API确认）")
+                return "already_signed"
+        
+        # 执行签到
+        signin_result = await page.evaluate('''
+            async () => {
+                try {
+                    const resp = await fetch("https://api.juejin.cn/growth_api/v1/check_in", {
+                        method: "POST",
+                        credentials: "include",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: "{}"
+                    });
+                    return await resp.json();
+                } catch(e) {
+                    return {err_msg: e.message};
+                }
+            }
+        ''')
+        
+        log(f"   API签到结果: {signin_result}")
+        
+        if signin_result and signin_result.get('err_no') == 0:
+            incr_point = signin_result.get('data', {}).get('incr_point', 0)
+            log(f"✅ API签到成功！获得 {incr_point} 矿石")
+            return True
+        elif signin_result and signin_result.get('err_no') == 15001:
+            log("ℹ️ 今日已签到（API返回重复签到）")
+            return "already_signed"
+        else:
+            err_msg = signin_result.get('err_msg', '未知错误') if signin_result else '无响应'
+            log(f"⚠️ API签到返回: {err_msg}")
+            return None  # 返回 None 表示 API 方式不确定，后续走 UI 方式
+            
+    except Exception as e:
+        log(f"API签到出错: {e}", True)
+        return None
+
+async def do_signin_ui(page):
+    """通过 UI 点击签到（API 失败时的后备方案）"""
+    log("   尝试 UI 签到（后备方案）...")
+    try:
+        await page.goto(SIGNIN_URL, timeout=20000)
+        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        await asyncio.sleep(3)
+        
+        # 等待页面 SPA 内容渲染
+        try:
+            await page.wait_for_selector('button:has-text("签到"), text="已签到"', timeout=8000)
+        except Exception:
+            log("   等待签到元素超时，继续检查页面...")
+        
+        page_text = await page.evaluate("document.body.innerText")
+        
+        # 检查是否已签到
+        if "已签到" in page_text:
+            log("ℹ️ 今日已签到（UI确认）")
+            return "already_signed"
+        
+        # 尝试多种选择器找签到按钮
+        selectors = [
+            'button:has-text("立即签到")',
+            'button:has-text("签到")',
+            ':is(div, span):has-text("立即签到")',
+            'text="立即签到"',
+        ]
+        
+        for selector in selectors:
+            try:
+                btn = page.locator(selector)
+                count = await btn.count()
+                if count > 0:
+                    log(f"   找到签到按钮 (selector: {selector})")
+                    await btn.first.scroll_into_view_if_needed()
+                    await asyncio.sleep(1)
+                    await btn.first.click()
+                    await asyncio.sleep(3)
+                    
+                    result_text = await page.evaluate("document.body.innerText")
+                    if "已签到" in result_text or "签到成功" in result_text:
+                        log("✅ UI签到成功！")
+                        return True
+                    else:
+                        log("✅ 签到按钮已点击")
+                        return True
+            except Exception as e:
+                continue
+        
+        # 所有选择器都没找到，记录页面内容用于诊断
+        log(f"⚠️ 未找到签到按钮，页面内容: {page_text[:500]}", True)
+        return False
+        
+    except Exception as e:
+        log(f"UI签到错误: {e}", True)
+        return False
+
+async def do_signin(page, context=None):
+    # 优先使用 API 签到
+    if context:
+        api_result = await do_signin_api(context)
+        if api_result is not None:
+            return api_result
+        log("   API签到不确定，切换到 UI 签到...")
+    
+    return await do_signin_ui(page)
 
 async def do_lottery(page):
     log("\n🎰 访问抽奖页面...")
@@ -440,11 +615,14 @@ async def run_task():
             
             is_logged_in = await check_login_status(page, context)
             if not is_logged_in:
-                log("❌ 未登录，请先登录")
-                await context.close()
-                return
+                login_success = await wait_for_login(page, context)
+                if not login_success:
+                    log("❌ 登录超时，请稍后重试")
+                    await context.close()
+                    return
+                log("✅ 登录成功，继续执行签到任务...")
             
-            signin_result = await do_signin(page)
+            signin_result = await do_signin(page, context)
             
             await asyncio.sleep(2)
             
