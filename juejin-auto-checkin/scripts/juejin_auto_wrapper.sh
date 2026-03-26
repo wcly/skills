@@ -6,4 +6,4 @@ DELAY=$((RANDOM % 3601))  # 0~3600 秒（0~60 分钟）
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 随机延迟 ${DELAY} 秒后执行签到..." >> /Users/ut/.juejin_auto.log
 sleep "$DELAY"
 
-/opt/homebrew/bin/python3 /Users/ut/.trae-cn/skills/juejin-auto-checkin/scripts/juejin_auto.py --headless
+python3 /Users/ut/Documents/learn/skills/juejin-auto-checkin/scripts/juejin_auto.py --headless

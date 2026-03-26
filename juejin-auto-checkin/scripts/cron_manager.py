@@ -44,7 +44,7 @@ def check_cron():
 
 def set_cron(hour, minute, script_path):
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    python_path = "/opt/homebrew/bin/python3"
+    python_path = "python3"
     
     plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -99,7 +99,7 @@ def delete_cron():
 
 def run_script(script_path):
     print(f"\n🚀 正在执行脚本...")
-    result = os.system(f"/opt/homebrew/bin/python3 {script_path}")
+    result = os.system(f"python3 {script_path}")
     if result == 0:
         print("✅ 执行完成")
     else:
