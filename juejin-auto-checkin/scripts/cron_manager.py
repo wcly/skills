@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-import os
+import subprocess
 import sys
 from pathlib import Path
 
-SCRIPTS_DIR = Path("/Users/ut/.trae-cn/skills/juejin-auto-checkin/scripts")
+SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = SKILL_DIR / "scripts"
+DEFAULT_SCRIPT_PATH = str(SCRIPTS_DIR / "juejin_auto.py")
+DEFAULT_WRAPPER_PATH = str(SCRIPTS_DIR / "juejin_auto_wrapper.sh")
 PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / "com.juejin.autosignin.plist"
 
 AVAILABLE_SCRIPTS = {
     "1": {
         "name": "稀土掘金自动签到",
-        "path": "/Users/ut/.trae-cn/skills/juejin-auto-checkin/scripts/juejin_auto.py",
+        "path": DEFAULT_SCRIPT_PATH,
+        "wrapper_path": DEFAULT_WRAPPER_PATH,
         "desc": "自动签到 + 免费抽奖"
     }
 }
@@ -33,10 +37,11 @@ def check_cron():
     hour_match = re.search(r'<key>Hour</key>\s*<integer>(\d+)</integer>', content)
     minute_match = re.search(r'<key>Minute</key>\s*<integer>(\d+)</integer>', content)
     if hour_match and minute_match:
-        script_match = re.search(r'<string>(/.*?\.py)</string>', content)
-        script_name = script_match.group(1) if script_match else "未知"
+        script_match = re.search(r'<string>(/.*?\.(?:py|sh))</string>', content)
+        configured_path = script_match.group(1) if script_match else "未知"
+        script_name = configured_path
         for key, s in AVAILABLE_SCRIPTS.items():
-            if s['path'] == script_name:
+            if configured_path in [s['path'], s.get('wrapper_path')]:
                 script_name = s['name']
                 break
         return f"{int(hour_match.group(1)):02d}:{int(minute_match.group(1)):02d}", script_name
@@ -44,19 +49,34 @@ def check_cron():
 
 def set_cron(hour, minute, script_path):
     PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    python_path = "python3"
+    selected_script = None
+    for script in AVAILABLE_SCRIPTS.values():
+        if script_path in [script["path"], script.get("wrapper_path")]:
+            selected_script = script
+            break
+
+    if selected_script and selected_script.get("wrapper_path"):
+        program_arguments = f"""
+    <array>
+        <string>/bin/bash</string>
+        <string>{selected_script['wrapper_path']}</string>
+    </array>""".rstrip()
+    else:
+        program_arguments = f"""
+    <array>
+        <string>python3</string>
+        <string>{script_path}</string>
+        <string>--headless</string>
+    </array>""".rstrip()
     
     plist_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <label>com.juejin.autosignin</label>
+    <key>Label</key>
+    <string>com.juejin.autosignin</string>
     <key>ProgramArguments</key>
-    <array>
-        <string>{python_path}</string>
-        <string>{script_path}</string>
-        <string>--headless</string>
-    </array>
+{program_arguments}
     <key>StartCalendarInterval</key>
     <array>
         <dict>
@@ -99,12 +119,12 @@ def delete_cron():
 
 def run_script(script_path):
     print(f"\n🚀 正在执行脚本...")
-    result = os.system(f"python3 {script_path}")
-    if result == 0:
+    result = subprocess.run(["python3", script_path], check=False)
+    if result.returncode == 0:
         print("✅ 执行完成")
     else:
-        print(f"❌ 执行失败，返回码: {result}")
-    return result == 0
+        print(f"❌ 执行失败，返回码: {result.returncode}")
+    return result.returncode == 0
 
 def interactive_setup():
     list_scripts()
@@ -159,7 +179,7 @@ if __name__ == "__main__":
             try:
                 hour = int(sys.argv[2])
                 minute = int(sys.argv[3])
-                script_path = sys.argv[4] if len(sys.argv) > 4 else "/Users/ut/.trae-cn/skills/juejin-auto-checkin/scripts/juejin_auto.py"
+                script_path = sys.argv[4] if len(sys.argv) > 4 else DEFAULT_SCRIPT_PATH
                 if 0 <= hour <= 23 and 0 <= minute <= 59:
                     set_cron(hour, minute, script_path)
                 else:
@@ -171,7 +191,7 @@ if __name__ == "__main__":
             delete_cron()
         
         elif cmd == "--run":
-            script_path = sys.argv[2] if len(sys.argv) > 2 else "/Users/ut/.trae-cn/skills/juejin-auto-checkin/scripts/juejin_auto.py"
+            script_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_SCRIPT_PATH
             run_script(script_path)
         
         elif cmd == "--interactive":
